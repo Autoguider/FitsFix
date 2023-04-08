@@ -1,7 +1,7 @@
 # FitsFix
 ### command-line utility to find and repair defect columns in astronomical images in fits-format
 
-> Due to the facts that I have a camera with a few "strange" columns Sander Pool's utility Fixfits seems not to be available anymore, I wrote a ppython script that helps to fix defect columns in images. As I do not dither the darker "strange" columns add up or spread over appr. 10 columns after stacking, looking nasty. 
+> Due to the facts that I have a camera with a few "strange" columns Sander Pool's utility Fixfits seems not to be available anymore, I wrote a python script that helps to fix defect columns in images. As I do not dither the darker "strange" columns add up or spread over appr. 10 columns after stacking, looking nasty. 
 > 
 > The script is designed to find and replace **single** defect columns in amateur astronomical CCD images in fits format.
 > 
