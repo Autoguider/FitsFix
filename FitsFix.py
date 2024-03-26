@@ -38,6 +38,15 @@ def csv_exists():
         return False  # no file found
 
 
+def ini_file_exist():
+    ini_list = glob.glob("Fix.ini")
+    if len(ini_list) != 0:
+        print("Found Fix.ini - using existing Fix.ini")
+        return True
+    else:
+        return False
+
+
 def create_directory4_fixed():
     if not os.path.exists('Fixed'):
         os.makedirs("Fixed")  # create
@@ -88,8 +97,14 @@ def repair_file(file2process):
     for i in cols2repair:  # ensure to deal with integers
         k = int(i)
         entry = entry + str(k) + '; '
+    entry.rstrip()
+    newentry = entry[:-2]
+    if len(newentry) < 45:
+        img_hdr.set('ColCorr', newentry, 'tweaked columns')
+    else:
+        newentry = newentry[:45] + '...'
     entry.rstrip(";")  # remove last semicolon
-    img_hdr.set('ColCorr', entry, 'tweaked columns')
+    img_hdr.set('ColCorr', newentry, 'tweaked columns')
     cwd = os.getcwd()
     accessed = (os.path.getatime(file2process))
     modified = (os.path.getmtime(file2process))
@@ -119,7 +134,13 @@ def scanfits(file2process):
         exit()
     # hdr = hdul[0].header  # get header to document where correction was done
     scan_data = scan_raw[0].data  # image data
+    scan_header =scan_raw[0].header
+    result = scan_header['BITPIX']
 
+    if (scan_header['BITPIX'] == (-32) or scan_header['BITPIX'] == -64):  # if floating point
+        print('Image ' + file2process +' is on floating point data - please remove from directory\n')
+        input('Abort program - Press key ')
+        exit()
     source = scan_data  # ndarray from fits-file; Just a reference - no deep copy
     source_offset = source + args.Threshold_Intensity  # add permitted tolerance
 
@@ -144,7 +165,10 @@ def scanfits(file2process):
 
 
 ##############################################################################################
+#  Start of program
+##############################################################################################
 
+#     Evaluate Commandline Args
 
 parser = ArgumentParser()
 parser.add_argument("-t", "--type", dest="Image_Kind", default="r", choices=["r", "m"],
@@ -152,7 +176,7 @@ parser.add_argument("-t", "--type", dest="Image_Kind", default="r", choices=["r"
 parser.add_argument("-m", "--mode", dest="Operation_Mode", default="sr", choices=["sr", "s", "r"],
                     help="sr scan & repair(= default), s scan only, r repair only,needs defects.csv in working direct.")
 parser.add_argument("-p", "--perc", dest="PercentsInCol", type=int, default=25,
-                    help="tolerated percentage of defects per columns default =25  input range 10..80 ")
+                    help="tolerated percentage of defects per columns default =20  input range 10..80 ")
 parser.add_argument("-thr", "--thres", dest="Threshold_Intensity", type=int, default=50,
                     help="tolerated difference in ADUs to neighbor col. elements default = 50 input range 30..3000")
 
@@ -161,10 +185,32 @@ Bayer = True  # True = Bayer Matrix = default value
 # FirstImage = True
 args = parser.parse_args()
 Image_type = args.Image_Kind
+Operation_type = args.Operation_Mode
+percentage_value = args.PercentsInCol
+threshold_value = args.Threshold_Intensity
+
+# parameters from Fix.ini override command line args
+
+getfrom_ini = ini_file_exist()
+if getfrom_ini == True:
+    with open('Fix.ini', 'r') as read_obj:
+        csv_reader = csv.reader(read_obj, delimiter=';')
+        arguments = list(csv_reader)  # list of lists
+    read_obj.close()
+    extr_args = arguments[0]
+    Image_type = extr_args[0]
+    Operation_type = extr_args[1]
+    percentage_value = int( extr_args[2])
+    threshold_value = int(extr_args[3])
+
+
+
+
+
 if Image_type == "m":
     Bayer = False
 # -------------------------
-Operation_type = args.Operation_Mode
+
 Program_Mode = "scan&repair"  # to be safe -set the default value
 if Operation_type == "sr":
     Program_Mode = "scan&repair"
@@ -173,13 +219,13 @@ if Operation_type == "s":
 if Operation_type == "r":
     Program_Mode = "repair"
 
-if args.PercentsInCol < 10 or args.PercentsInCol > 80:
+if percentage_value < 10 or percentage_value > 80:
     print('percentage out of range 10...80')
     print('please restart with value 10...80')
     input('exit program press any key')
     exit()
 
-if args.Threshold_Intensity < 30 or args.Threshold_Intensity > 3000:
+if threshold_value < 30 or threshold_value > 3000:
     print('value out of allowed range 30...3000')
     print('please restart with value in range 30...3000')
     input('exit program press any key ')
@@ -207,6 +253,8 @@ max_cols = data.shape[1]
 if hdr['NAXIS'] > 2:  # if color converted
     input('Image seems to be color converted - Abort program - Press key ')
     exit()
+
+
 AllowedDefectPerCol = data.shape[0] * args.PercentsInCol // 100
 
 try:
@@ -229,27 +277,39 @@ if ((Program_Mode == "scan") or (Program_Mode == "scan&repair")) and (csv_valid 
         scanfits(file2check)
 
     counted = (Accumulator[np.where(Accumulator > 0)])
-    indexes = np.where(count > 0)[0]
+    indexes = np.where(Accumulator > 0)[0]
+    # remove 1st 2 entries in case of Bayer matrix else it is monochrome
+    if Bayer == True:
+        newCounted = np.delete(counted, [0, 1])
+        newIndexes = np.delete(indexes, [0, 1])
+    else:
+        newCounted = np.delete(counted, 0)
+        newIndexes = np.delete(indexes, 0)
+    # indexes = np.where(count > 0)[0]
     newInd = np.delete(counted, -1)  # remove last element
     newInd = np.delete(newInd, 0)  # remove 1st element
 
     print('\nResults of scan :')
-    print(format2string("times counted :", 7, newInd))
+    print(format2string("times counted :", 7, newCounted))
 
-    newInd = np.delete(indexes, -1)
-    newInd = np.delete(newInd, 0)
-    print(format2string("in column     :", 7, newInd))
+    print(format2string("in column     :", 7, newIndexes))
+    occurrlimit = int(len(Datafiles) * 0.3)
+    i = np.where(newCounted >= occurrlimit)
+    output = newIndexes[i]
 
     with open('defects.csv', 'w', newline='') as csvfile:
         resultwriter = csv.writer(csvfile, delimiter=';', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-        resultwriter.writerow(newInd)
+        resultwriter.writerow(output)
+        s = ''.join(str(x) for x in output)
+        h = len(s) + len(output) - 1
         resultwriter.writerow('')
         if len(camera_name) > 0:
             dummy = ['Camera:', camera_name]
             resultwriter.writerow(dummy)
 
     csvfile.close()
-    print('\nNew file "defects.csv" written to current directory\n')
+    print('\nNew file "defects.csv" written to current directory')
+    print('mapped defect columns occurring in >30% of images\n')
     if Program_Mode == "scan":
         input("Scanning done - results in defects.csv -press any key to quit")
         exit()
@@ -263,7 +323,9 @@ with open('defects.csv', 'r') as read_obj:
     cols2repair = list(csv_reader)  # list of lists
 read_obj.close()
 cols2repair = cols2repair[0]
-
+if len(cols2repair) == 0:
+    input('No columns to correct indicated in file - Abort program Press key')
+    exit()
 for nn in cols2repair:
     k = nn.isnumeric()
     if k is False:
