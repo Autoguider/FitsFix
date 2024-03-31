@@ -80,48 +80,55 @@ def repair_file(file2process):
         exit()
 
     img_hdr = raw_fits[0].header  # get header to document where correction was done
-    img_data = raw_fits[0].data  # image data
-    source = img_data
+    if (img_hdr['BITPIX'] != (-32) and img_hdr['BITPIX'] != -64):  # if floating point
+        img_data = raw_fits[0].data  # image data
+        source = img_data
 
-    if Bayer is True:
-        compare_right = np.roll(source, -2, axis=1)  # shift 2cols left
-        compare_left = np.roll(source, 2, axis=1)  # shift 2cols left
-    else:
-        compare_right = np.roll(source, -1, axis=1)  # shift 1col left
-        compare_left = np.roll(source, 1, axis=1)  # shift 1col left
-    average_array = compare_right + compare_left  # building averaged values for correction
-    average_array = average_array // 2  # integer division sufficient accurate for later use
-    for i in cols2repair:
-        source[:, int(i)] = average_array[:, int(i)]  # exchange of the values
-    entry = ""
-    for i in cols2repair:  # ensure to deal with integers
-        k = int(i)
-        entry = entry + str(k) + '; '
-    entry.rstrip()
-    newentry = entry[:-2]
-    if len(newentry) < 45:
+        if Bayer is True:
+            compare_right = np.roll(source, -2, axis=1)  # shift 2cols left
+            compare_left = np.roll(source, 2, axis=1)  # shift 2cols left
+        else:
+            compare_right = np.roll(source, -1, axis=1)  # shift 1col left
+            compare_left = np.roll(source, 1, axis=1)  # shift 1col left
+        average_array = compare_right + compare_left  # building averaged values for correction
+        average_array = average_array // 2  # integer division sufficient accurate for later use
+        for i in cols2repair:
+            source[:, int(i)] = average_array[:, int(i)]  # exchange of the values
+        entry = ""
+        for i in cols2repair:  # ensure to deal with integers
+            k = int(i)
+            entry = entry + str(k) + '; '
+        entry.rstrip()
+        newentry = entry[:-2]
+        if len(newentry) < 45:
+            img_hdr.set('ColCorr', newentry, 'tweaked columns')
+        else:
+            newentry = newentry[:45] + '...'
+        entry.rstrip(";")  # remove last semicolon
         img_hdr.set('ColCorr', newentry, 'tweaked columns')
-    else:
-        newentry = newentry[:45] + '...'
-    entry.rstrip(";")  # remove last semicolon
-    img_hdr.set('ColCorr', newentry, 'tweaked columns')
-    cwd = os.getcwd()
-    accessed = (os.path.getatime(file2process))
-    modified = (os.path.getmtime(file2process))
-    s = cwd + '/Fixed/' + file2process
-    sep = '.'
-    erg = s.rpartition(sep)
-    save_as_name = erg[0] + 'C' + erg[1] + erg[2]
-    try:
-        raw_fits.writeto(save_as_name)
-        print(save_as_name + ' repaired')
-    except IOError as err:
-        print("I/O error({0}): {1}".format(err.errno, err.strerror))
-        input('press key to exit ')
-        exit()
+        cwd = os.getcwd()
+        accessed = (os.path.getatime(file2process))
+        modified = (os.path.getmtime(file2process))
+        s = cwd + '/Fixed/' + file2process
+        sep = '.'
+        erg = s.rpartition(sep)
+        save_as_name = erg[0] + 'C' + erg[1] + erg[2]
+        try:
+            raw_fits.writeto(save_as_name)
+            print(save_as_name + ' repaired')
+        except IOError as err:
+            print("I/O error({0}): {1}".format(err.errno, err.strerror))
+            input('press key to exit ')
+            exit()
 
-    tup = (accessed, modified)  # modify timestamp
-    os.utime(save_as_name, tup)
+        tup = (accessed, modified)  # modify timestamp
+        os.utime(save_as_name, tup)
+        global no_filesrepaired
+        no_filesrepaired += 1
+    else:
+        print(file2process + ' is floating point -> no repair')
+        global no_filesrejected
+        no_filesrejected += 1
     raw_fits.close()
 
 
@@ -134,34 +141,37 @@ def scanfits(file2process):
         exit()
     # hdr = hdul[0].header  # get header to document where correction was done
     scan_data = scan_raw[0].data  # image data
-    scan_header =scan_raw[0].header
+    scan_header = scan_raw[0].header
     result = scan_header['BITPIX']
 
-    if (scan_header['BITPIX'] == (-32) or scan_header['BITPIX'] == -64):  # if floating point
-        print('Image ' + file2process +' is on floating point data - please remove from directory\n')
-        input('Abort program - Press key ')
-        exit()
-    source = scan_data  # ndarray from fits-file; Just a reference - no deep copy
-    source_offset = source + args.Threshold_Intensity  # add permitted tolerance
+    if (scan_header['BITPIX'] != (-32) and scan_header['BITPIX'] != -64):  # if floating point
+        #print('Image ' + file2process +' is on floating point data - please remove from directory\n')
+        #input('Abort program - Press key ')
+        #exit()
+        source = scan_data  # ndarray from fits-file; Just a reference - no deep copy
+        source_offset = source + args.Threshold_Intensity  # add permitted tolerance
 
-    if Bayer is True:
-        compare_right = np.roll(source, -2, axis=1)  # shift 2cols left
-        compare_left = np.roll(source, 2, axis=1)  # shift 2cols left
+        if Bayer is True:
+            compare_right = np.roll(source, -2, axis=1)  # shift 2cols left
+            compare_left = np.roll(source, 2, axis=1)  # shift 2cols left
 
+        else:
+            compare_right = np.roll(source, -1, axis=1)  # shift 1col left
+            compare_left = np.roll(source, 1, axis=1)  # shift 1col left
+        comresright = source_offset < compare_right  # reduce to boolean values
+        comresleft = source_offset < compare_left
+        comresleft = comresleft & comresright  # True only if in both compare array
+        global count
+        count = np.count_nonzero(comresleft, axis=0)  # number of "TRUEs" per column
+        count[count <= AllowedDefectPerCol] = 0  # set to 0 if less TRUEs than allowed
+        count[count > 0] = 1  # set to 1 for adding to an accumulator
+        global Accumulator  # required because global variable is changed from inside this function
+        Accumulator = Accumulator + count
+        print((file2process + '  scanned'))
     else:
-        compare_right = np.roll(source, -1, axis=1)  # shift 1col left
-        compare_left = np.roll(source, 1, axis=1)  # shift 1col left
-    comresright = source_offset < compare_right  # reduce to boolean values
-    comresleft = source_offset < compare_left
-    comresleft = comresleft & comresright  # True only if in both compare array
-    global count
-    count = np.count_nonzero(comresleft, axis=0)  # number of "TRUEs" per column
-    count[count <= AllowedDefectPerCol] = 0  # set to 0 if less TRUEs than allowed
-    count[count > 0] = 1  # set to 1 for adding to an accumulator
-    global Accumulator  # required because global variable is changed from inside this function
-    Accumulator = Accumulator + count
+        print((file2process + ' floating point-> skipped '))
     scan_raw.close()
-    print((file2process + '  scanned'))
+
 
 
 ##############################################################################################
@@ -279,15 +289,15 @@ if ((Program_Mode == "scan") or (Program_Mode == "scan&repair")) and (csv_valid 
     counted = (Accumulator[np.where(Accumulator > 0)])
     indexes = np.where(Accumulator > 0)[0]
     # remove 1st 2 entries in case of Bayer matrix else it is monochrome
-    if Bayer == True:
-        newCounted = np.delete(counted, [0, 1])
-        newIndexes = np.delete(indexes, [0, 1])
-    else:
-        newCounted = np.delete(counted, 0)
-        newIndexes = np.delete(indexes, 0)
-    # indexes = np.where(count > 0)[0]
-    newInd = np.delete(counted, -1)  # remove last element
-    newInd = np.delete(newInd, 0)  # remove 1st element
+
+    if indexes[0] == 0:
+        newIndexes = np.delete(indexes, [0])
+        newCounted = np.delete(counted, [0])
+    if newIndexes[-1] == max_cols -1 :
+        newIndexes = np.delete(newIndexes, [-1])
+        newCounted = np.delete(newCounted, [-1])
+
+
 
     print('\nResults of scan :')
     print(format2string("times counted :", 7, newCounted))
@@ -309,7 +319,7 @@ if ((Program_Mode == "scan") or (Program_Mode == "scan&repair")) and (csv_valid 
 
     csvfile.close()
     print('\nNew file "defects.csv" written to current directory')
-    print('mapped defect columns occurring in >30% of images\n')
+    print('mapped ' + str(output) + ' as defect columns in file\n')
     if Program_Mode == "scan":
         input("Scanning done - results in defects.csv -press any key to quit")
         exit()
@@ -339,9 +349,12 @@ for nn in cols2repair:
         exit()
 
 create_directory4_fixed()
-
+no_filesrepaired = 0
+no_filesrejected = 0
 for file2repair in Datafiles:
     repair_file(file2repair)
 
-print('\n*** corrections done ***')
-input('To exit program - press key')
+print('\n*** files repaired: ' + str(no_filesrepaired) + ' ***')
+if no_filesrejected > 0:
+    print('*** files rejected: ' + str(no_filesrejected) + ' ***')
+input('\nTo exit program - press key')
